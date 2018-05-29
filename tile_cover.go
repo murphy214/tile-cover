@@ -1,19 +1,46 @@
 package tile_cover
 
 import (
-	"github.com/paulmach/go.geojson"
-	f "github.com/murphy214/feature-map"
+	"fmt"
 	m "github.com/murphy214/mercantile"
+	"github.com/paulmach/go.geojson"
 	"math"
 )
 
+//
+func RunPolygon(polygon [][][]float64, tile m.TileID) bool {
+	for _, cont := range polygon {
+		for _, pt := range cont {
+			tileid := m.Tile(pt[0], pt[1], int(tile.Z))
+			if tileid.X == tile.X && tileid.Y == tile.Y {
+				return true
+			}
+		}
+	}
+	return false
+}
 
-// pip function
-type Poly [][][]float64
-func (cont Poly) Pip(p []float64) bool {
+// checks a single tile
+func TilePolygon(polygon [][][]float64, polygonbds m.Extrema, tileid m.TileID) bool {
+	bds := m.Bounds(tileid)
+
+	if polygonbds.N < bds.N && polygonbds.S > bds.S && polygonbds.E < bds.E && polygonbds.W > bds.W {
+		return true
+	}
+
+	wn := []float64{bds.W, bds.N}
+	ws := []float64{bds.W, bds.S}
+	en := []float64{bds.E, bds.N}
+	es := []float64{bds.E, bds.S}
+
+	return Pip(polygon, wn) || Pip(polygon, ws) || Pip(polygon, en) || Pip(polygon, es) || RunPolygon(polygon, tileid)
+}
+
+// point in polygon
+func Pip(cont [][][]float64, p []float64) bool {
 	// Cast ray from p.x towards the right
 	intersections := 0
-	for _,c := range cont {
+	for _, c := range cont {
 		for i := range c {
 			curr := c[i]
 			ii := i + 1
@@ -27,7 +54,7 @@ func (cont Poly) Pip(p []float64) bool {
 			// exclusive (not part of edge) -- i.e. p lies "slightly above
 			// the ray"
 			bottom, top := curr, next
-			if bottom[1] > top[1] {
+			if bottom[1] >= top[1] {
 				bottom, top = top, bottom
 			}
 			if p[1] < bottom[1] || p[1] >= top[1] {
@@ -42,7 +69,7 @@ func (cont Poly) Pip(p []float64) bool {
 
 			// Find where the line intersects...
 			xint := (p[1]-curr[1])*(next[0]-curr[0])/(next[1]-curr[1]) + curr[0]
-			if curr[0] != next[0] && p[0] > xint {
+			if curr[0] != next[0] && p[0] >= xint {
 				continue
 			}
 
@@ -53,204 +80,157 @@ func (cont Poly) Pip(p []float64) bool {
 	return intersections%2 != 0
 }
 
-func Get_Corners(bds m.Extrema) ([]float64,[]float64,[]float64,[]float64) {
-	wn := []float64{bds.W,bds.N}
-	ws := []float64{bds.W,bds.S}
-	en := []float64{bds.E,bds.N}
-	es := []float64{bds.E,bds.S}
-	return wn,ws,en,es
-}
+// gets the tiles on a line
+func GetTilesLine(line [][]float64, zoom int) []m.TileID {
+	firsttile := m.Tile(line[0][0], line[0][1], zoom)
+	bds := m.Bounds(firsttile)
 
-func Get_Min_Max(bds m.Extrema,zoom int) (int,int,int,int) {
-	// getting corners
-	wn,_,_,es := Get_Corners(bds)
-
-	wnt := m.Tile(wn[0],wn[1],zoom)
-	est := m.Tile(es[0],es[1],zoom)
-	minx,maxx,miny,maxy := int(wnt.X),int(est.X),int(wnt.Y),int(est.Y)
-	return minx,maxx,miny,maxy
-}
-
-// assembles a set of ranges
-func Between(minval,maxval int) []int {
-	current := minval 
-	newlist := []int{current}
-	for current < maxval {
-		current += 1
-		newlist = append(newlist,current)
-	}
-	return newlist
-}
-
-// getting tiles that cover the bounding box
-func Get_BB_Tiles(bds m.Extrema,zoom int) []m.TileID {
-	// the getting min and max
-	minx,maxx, miny,maxy := Get_Min_Max(bds,zoom)
-	
-	// getting xs and ys
-	xs,ys := Between(minx,maxx),Between(miny,maxy)
-
-	// gertting all tiles
-	newlist := []m.TileID{}
-	for _,x := range xs {
-		for _,y := range ys {
-			newlist = append(newlist,m.TileID{int64(x),int64(y),uint64(zoom)})
+	deltax := bds.E - bds.W
+	deltay := bds.N - bds.S
+	oldpt := line[0]
+	tiles := []m.TileID{firsttile}
+	tilesmap := map[m.TileID]string{firsttile: ""}
+	for _, pt := range line[1:] {
+		if math.Abs(pt[0]-oldpt[0]) > deltax {
+			fmt.Println("here")
 		}
-	}
-	return newlist
-}
-
-// regular interpolation
-func Interpolate(pt1,pt2 []float64,x float64) []float64 {
-	slope := (pt2[1] - pt1[1]) / (pt2[0] - pt1[0])
-	if math.Abs(slope) == math.Inf(1) {
-		return []float64{pt1[0],(pt1[1]+pt2[1])/2.0}
-	}
-	return []float64{x,(x - pt1[0]) * slope + pt1[1]}
-
-}
-
-// interpolates points
-func Interpolate_Pts(pt1,pt2 []float64,zoom int) []m.TileID {
-	newtiles := []m.TileID{m.Tile(pt1[0],pt1[1],zoom),m.Tile(pt2[0],pt2[1],zoom)}
-	var bds m.Extrema
-	if pt1[0] >= pt2[0] {
-		bds.E = pt1[0]
-		bds.W = pt2[0]
-	} else {
-		bds.W = pt1[0]
-		bds.E = pt2[0]
-	}
-	if pt1[1] >= pt2[1] {
-		bds.N = pt1[1]
-		bds.S = pt2[1]
-	} else {
-		bds.S = pt1[1]
-		bds.N = pt2[1]
-	}
-
-	minx,maxx,miny,maxy := Get_Min_Max(bds,zoom)
-	for _,x := range Between(minx,maxx) {
-		tmpbds := m.Bounds(m.TileID{int64(x),int64(miny),uint64(zoom)})
-		x1,x2 := tmpbds.W + .00000001,tmpbds.E - .00000001
-		//x1,x2 := tmpbds.W ,tmpbds.E
-
-		if bds.W <= x1 && bds.E >= x1 {
-			pt := Interpolate(pt1,pt2,x1)
-			newtiles = append(newtiles,m.Tile(pt[0],pt[1],zoom))
+		if math.Abs(pt[1]-oldpt[1]) > deltay {
+			fmt.Println("here")
 		}
-		if bds.W <= x2 && bds.E >= x2 {
-			pt := Interpolate(pt1,pt2,x2)
-			newtiles = append(newtiles,m.Tile(pt[0],pt[1],zoom))
+		currenttile := m.Tile(pt[0], pt[1], zoom)
+		_, boolval := tilesmap[currenttile]
+		if !boolval {
+			tilesmap[currenttile] = ""
+			tiles = append(tiles, currenttile)
 		}
-	}
-	pt1b := []float64{pt1[1],pt1[0]}
-	pt2b := []float64{pt2[1],pt2[0]}
 
-	for _,y := range Between(miny,maxy) {
-		tmpbds := m.Bounds(m.TileID{int64(minx),int64(y),uint64(zoom)})
-		y1,y2 := tmpbds.S + .00000001,tmpbds.N - .00000001
-		//y1,y2 := tmpbds.S ,tmpbds.N
-
-		if bds.S <= y1 && bds.N >= y1 {
-			pt := Interpolate(pt1b,pt2b,y1)
-			pt = []float64{pt[1],pt[0]}
-			newtiles = append(newtiles,m.Tile(pt[0],pt[1],zoom))
-		}
-		if bds.S <= y2 && bds.N >= y2 {
-			pt := Interpolate(pt1b,pt2b,y2)
-			pt = []float64{pt[1],pt[0]}
-			newtiles = append(newtiles,m.Tile(pt[0],pt[1],zoom))
-		}
-	}
-
-
-	return newtiles
-}
-
-func Interpolate_Line(coords [][]float64,zoom int) []m.TileID {
-	newtiles := []m.TileID{}
-	oldpt := coords[0]
-	for _,pt := range coords {
-		newtiles = append(newtiles,Interpolate_Pts(oldpt,pt,zoom)...)
 		oldpt = pt
 	}
 
-	newtiles2 := []m.TileID{}
+	return tiles
+}
+
+// BoundingBox implementation as per https://tools.ietf.org/html/rfc7946
+// BoundingBox syntax: "bbox": [west, south, east, north]
+// BoundingBox defaults "bbox": [-180.0, -90.0, 180.0, 90.0]
+func BoundingBoxPoints(pts [][]float64) m.Extrema {
+	// setting opposite default values
+	west, south, east, north := 180.0, 90.0, -180.0, -90.0
+
+	for _, pt := range pts {
+		x, y := pt[0], pt[1]
+		// can only be one condition
+		// using else if reduces one comparison
+		if x < west {
+			west = x
+		} else if x > east {
+			east = x
+		}
+
+		if y < south {
+			south = y
+		} else if y > north {
+			north = y
+		}
+	}
+	return m.Extrema{N: north, S: south, E: east, W: west}
+}
+
+//
+func GetDif(x1, x2 int64) []int64 {
+	current := x1
+	newlist := []int64{current}
+	for current < x2 {
+		current++
+		newlist = append(newlist, current)
+	}
+	return newlist
+}
+
+// gets the tiles of a single polygon
+func GetTilesPolygon(polygon [][][]float64, zoom int) []m.TileID {
+	bds := BoundingBoxPoints(polygon[0])
+	wn := []float64{bds.W, bds.N}
+	es := []float64{bds.E, bds.S}
+
+	tilemin := m.Tile(wn[0], wn[1], zoom)
+	tilemax := m.Tile(es[0], es[1], zoom)
+
+	xs := GetDif(tilemin.X, tilemax.X)
+	ys := GetDif(tilemin.Y, tilemax.Y)
+	pottiles := []m.TileID{}
+	for _, x := range xs {
+		for _, y := range ys {
+			pottiles = append(pottiles, m.TileID{x, y, uint64(zoom)})
+		}
+	}
+
+	// checks the potential tiles
+	tiles := []m.TileID{}
+	for _, i := range pottiles {
+		if TilePolygon(polygon, bds, i) {
+			tiles = append(tiles, i)
+		}
+	}
+
+	return tiles
+}
+
+// creates a map
+func CreateMap(tiles []m.TileID) map[m.TileID]string {
 	mymap := map[m.TileID]string{}
-	for _,i := range newtiles {	
-		_,ok := mymap[i]
-		if ok == false {
-			mymap[i] = ""
-			newtiles2 = append(newtiles2,i)
-		}
+	for _, i := range tiles {
+		mymap[i] = ""
 	}
-	return newtiles2
+	return mymap
 }
 
-
-func Fix_Polygon(coords [][][]float64) [][][]float64 {
-	for i,cont := range coords {
-		if (cont[0][0] != cont[len(cont) - 1][0]) && (cont[0][1] != cont[len(cont) - 1][1]) {
-			cont = append(cont,cont[0])
-			coords[i] = cont
-		}
-	}
-	return coords
-}
-
-
-// covers a tile
-func Tile_Cover(feat *geojson.Feature) []m.TileID {
-	innertiles := []m.TileID{}
-	zoom := 0
-
-	if feat.Geometry.Type == "Polygon" {
-		poly := Poly(feat.Geometry.Polygon)
-
-		// getting bds
-		bds := f.Get_Bds(feat.Geometry)
-		boolval := true
-		for boolval {
-			tiles := Get_BB_Tiles(bds,zoom)
-			for _,tile := range tiles {
-				tmpbds := m.Bounds(tile)
-				wn,ws,en,es := Get_Corners(tmpbds)
-				wnpip,wspip,enpip,espip := poly.Pip(wn),poly.Pip(ws),poly.Pip(en),poly.Pip(es)
-				mybool := wnpip && wspip && enpip && espip
-				if mybool {
-					boolval = false
-					innertiles = append(innertiles,tile)
+func TileCover(feature *geojson.Feature, zoom int) []m.TileID {
+	mymap := map[m.TileID]string{}
+	total := []m.TileID{}
+	switch feature.Geometry.Type {
+	case "Point":
+		return []m.TileID{m.Tile(feature.Geometry.Point[0], feature.Geometry.Point[1], zoom)}
+	case "LineString":
+		return GetTilesLine(feature.Geometry.LineString, zoom)
+	case "Polygon":
+		return GetTilesPolygon(feature.Geometry.Polygon, zoom)
+	case "MultiPoint":
+		return GetTilesLine(feature.Geometry.LineString, zoom)
+	case "MultiLineString":
+		for pos, line := range feature.Geometry.MultiLineString {
+			tmp := GetTilesLine(line, zoom)
+			if pos == 0 {
+				mymap = CreateMap(tmp)
+				total = tmp
+			} else {
+				for _, tile := range tmp {
+					_, boolval := mymap[tile]
+					if !boolval {
+						mymap[tile] = ""
+						total = append(total, tile)
+					}
 				}
-			} 
-			zoom += 1
-		}
-		zoom = zoom - 1
-		for _,cont := range feat.Geometry.Polygon {
-
-			innertiles = append(innertiles,Interpolate_Line(cont,zoom)...)
-		}
-		newtiles2 := []m.TileID{}
-		mymap := map[m.TileID]string{}
-		for _,i := range innertiles {	
-			_,ok := mymap[i]
-			if ok == false {
-				mymap[i] = ""
-				newtiles2 = append(newtiles2,i)
 			}
 		}
-		innertiles = newtiles2
-	} else if feat.Geometry.Type == "LineString" {
-		boolval := true 
-		for boolval {
-			tempinnertiles := Interpolate_Line(feat.Geometry.LineString,zoom)
-			if len(tempinnertiles) >= 5 || zoom >= 20 {
-				boolval = false
-				innertiles = tempinnertiles
-
+		return total
+	case "MultiPolygon":
+		for pos, polygon := range feature.Geometry.MultiPolygon {
+			tmp := GetTilesPolygon(polygon, zoom)
+			if pos == 0 {
+				mymap = CreateMap(tmp)
+				total = tmp
+			} else {
+				for _, tile := range tmp {
+					_, boolval := mymap[tile]
+					if !boolval {
+						mymap[tile] = ""
+						total = append(total, tile)
+					}
+				}
 			}
-			zoom += 1
 		}
+		return total
 	}
-	return innertiles
+	return total
 }
