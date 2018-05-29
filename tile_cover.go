@@ -1,4 +1,4 @@
-package tile_cover
+package tilecover
 
 import (
 	"fmt"
