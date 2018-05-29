@@ -1,6 +1,6 @@
 # tile-cover
 
-This package is a barebones implementation of a tile covering algorithm for simple line and polygon features. It could be much more complex but really I just needed something to work with tile-reduce and figured this is standalone enough to warant its own repo. 
+Keep it simple stupid. Given a geojson feature, and a zoom return all the tiles that have an intersection. The old one tried to determine the zoom for you this one skips that. 
 
 # Usage 
 ```go
@@ -20,7 +20,7 @@ func main() {
 	fc, _ := geojson.UnmarshalFeatureCollection(bytevals)
 	feat := fc.Features[20]
 
-	tileids := tile_cover.Tile_Cover(feat)
+	tileids := tile_cover.TileCover(feat,10)
 	for _,i := range tileids {
 		fmt.Println(m.Tilestr(i))
 	}
