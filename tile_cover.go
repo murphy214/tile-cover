@@ -215,21 +215,28 @@ func TileCover(feature *geojson.Feature, zoom int) []m.TileID {
 		}
 		return total
 	case "MultiPolygon":
-		for pos, polygon := range feature.Geometry.MultiPolygon {
-			tmp := GetTilesPolygon(polygon, zoom)
-			if pos == 0 {
-				mymap = CreateMap(tmp)
-				total = tmp
-			} else {
-				for _, tile := range tmp {
-					_, boolval := mymap[tile]
-					if !boolval {
-						mymap[tile] = ""
-						total = append(total, tile)
+		/*
+			for pos, polygon := range feature.Geometry.MultiPolygon {
+
+				tmp := GetTilesPolygon(polygon, zoom)
+				fmt.Println(tmp)
+				if pos == 0 {
+					fmt.Println("here1")
+					mymap = CreateMap(tmp)
+					total = tmp
+				} else {
+					fmt.Println("here2")
+					for _, tile := range tmp {
+						_, boolval := mymap[tile]
+						if !boolval {
+							mymap[tile] = ""
+							total = append(total, tile)
+							fmt.Println(len(total))
+						}
 					}
 				}
 			}
-		}
+		*/
 		return total
 	}
 	return total
