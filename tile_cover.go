@@ -1,7 +1,6 @@
 package tilecover
 
 import (
-	"fmt"
 	m "github.com/murphy214/mercantile"
 	"github.com/paulmach/go.geojson"
 	"math"
@@ -41,6 +40,9 @@ func Pip(cont [][][]float64, p []float64) bool {
 	// Cast ray from p.x towards the right
 	intersections := 0
 	for _, c := range cont {
+		if c[0][0] != c[len(c)-1][0] {
+			c = append(c, c[0])
+		}
 		for i := range c {
 			curr := c[i]
 			ii := i + 1
@@ -91,11 +93,18 @@ func GetTilesLine(line [][]float64, zoom int) []m.TileID {
 	tiles := []m.TileID{firsttile}
 	tilesmap := map[m.TileID]string{firsttile: ""}
 	for _, pt := range line[1:] {
-		if math.Abs(pt[0]-oldpt[0]) > deltax {
-			fmt.Println("here")
-		}
-		if math.Abs(pt[1]-oldpt[1]) > deltay {
-			fmt.Println("here")
+		if (math.Abs(pt[0]-oldpt[0]) > deltax) || (math.Abs(pt[1]-oldpt[1]) > deltay) {
+
+			tmptiles := BetweenTiles(oldpt, pt, zoom)
+
+			for _, tmptile := range tmptiles {
+				_, boolval := tilesmap[tmptile]
+				if !boolval {
+					tiles = append(tiles, tmptile)
+					tilesmap[tmptile] = ""
+				}
+			}
+
 		}
 		currenttile := m.Tile(pt[0], pt[1], zoom)
 		_, boolval := tilesmap[currenttile]
@@ -194,7 +203,12 @@ func TileCover(feature *geojson.Feature, zoom int) []m.TileID {
 	case "LineString":
 		return GetTilesLine(feature.Geometry.LineString, zoom)
 	case "Polygon":
-		return GetTilesPolygon(feature.Geometry.Polygon, zoom)
+		if len(feature.Geometry.Polygon[0]) > 3 {
+			return GetTilesPolygon(feature.Geometry.Polygon, zoom)
+		} else {
+			return total
+		}
+
 	case "MultiPoint":
 		return GetTilesLine(feature.Geometry.LineString, zoom)
 	case "MultiLineString":
